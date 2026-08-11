@@ -1,8 +1,10 @@
 // complaintSlice.js – Redux Toolkit slice for complaint state management
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
 import axios from "axios";
-
-const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ||
+  import.meta.env.VITE_API_URL ||
+  "https://resolveai-xnzt.onrender.com";
 const api      = axios.create({ baseURL: BASE_URL });
 
 // ─────────────────────────────────────────────
