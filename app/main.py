@@ -65,6 +65,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+@app.get("/")
+def read_root():
+    return {"status": "active", "message": "ResolveAI Backend is up and running!"}
 
 
 # ──────────────────────────────────────────────
