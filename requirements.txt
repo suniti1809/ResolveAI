@@ -1,0 +1,28 @@
+# Python >= 3.14 required
+
+# ── Web framework ─────────────────────────────
+fastapi
+uvicorn
+python-dotenv
+
+# ── Pydantic ──────────────────────────────────
+pydantic
+pydantic-settings
+
+# ── Database ──────────────────────────────────
+sqlalchemy
+alembic
+aiosqlite
+
+# ── AI / LangChain ecosystem ──────────────────
+groq
+langchain-core
+langchain-groq
+langgraph
+
+# ── Utilities ─────────────────────────────────
+httpx
+python-multipart
+aiofiles
+email-validator
+typing-extensions

@@ -1,0 +1,312 @@
+/* index.css – Global dark-mode design system for ResolveAI CCMS */
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─────────────────────────────────────────────────────────────
+   Base overrides
+───────────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  /* Inter primary, Outfit fallback */
+  font-family: "Inter", "Outfit", ui-sans-serif, system-ui, sans-serif;
+  background-color: #0f172a;
+  color: #f8fafc;
+  min-height: 100vh;
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* Subtle noise texture overlay */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.04'/%3E%3C/svg%3E");
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Custom scrollbar
+───────────────────────────────────────────────────────────── */
+::-webkit-scrollbar         { width: 5px; height: 5px; }
+::-webkit-scrollbar-track   { background: transparent; }
+::-webkit-scrollbar-thumb   { background: #334155; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+/* ─────────────────────────────────────────────────────────────
+   Select element – consistent dark theming
+───────────────────────────────────────────────────────────── */
+select option {
+  background-color: #0f172a;
+  color: #f8fafc;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Animated gradient background orbs
+───────────────────────────────────────────────────────────── */
+.bg-orb {
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(120px);
+  opacity: 0.12;
+  pointer-events: none;
+  z-index: 0;
+  animation: blob 10s infinite;
+}
+
+/* Orb 1 – electric blue */
+.bg-orb-1 {
+  width: 600px;
+  height: 600px;
+  background: conic-gradient(from 180deg at 50% 50%, #1d4ed8 0deg, #2563eb 180deg, #1d4ed8 360deg);
+  top: -20%;
+  left: -10%;
+  animation-delay: 0s;
+}
+
+/* Orb 2 – violet */
+.bg-orb-2 {
+  width: 500px;
+  height: 500px;
+  background: conic-gradient(from 0deg at 50% 50%, #7c3aed 0deg, #4c1d95 180deg, #7c3aed 360deg);
+  bottom: -20%;
+  right: -10%;
+  animation-delay: 2s;
+}
+
+/* Orb 3 – deep blue accent */
+.bg-orb-3 {
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, #3b82f6 0%, transparent 70%);
+  top: 40%;
+  left: 60%;
+  opacity: 0.08;
+  animation-delay: 4s;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Glassmorphism utilities
+───────────────────────────────────────────────────────────── */
+.glass {
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.15);
+}
+
+.glass-panel {
+  background: linear-gradient(145deg, rgba(30, 41, 59, 0.55) 0%, rgba(15, 23, 42, 0.85) 100%);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(51, 65, 85, 0.7);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 8px 32px rgba(0, 0, 0, 0.45);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Section card – form grouping containers
+───────────────────────────────────────────────────────────── */
+.section-card {
+  background: rgba(30, 41, 59, 0.5);
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.section-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #64748b;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(51, 65, 85, 0.5);
+}
+
+.section-card-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(37, 99, 235, 0.2);
+  border: 1px solid rgba(37, 99, 235, 0.4);
+  color: #60a5fa;
+  font-size: 0.625rem;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Gradient text
+───────────────────────────────────────────────────────────── */
+.gradient-text {
+  background: linear-gradient(135deg, #60a5fa, #818cf8, #a78bfa);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Input focus glow – electric blue
+───────────────────────────────────────────────────────────── */
+.input-focus-glow {
+  transition: all 0.2s ease;
+}
+.input-focus-glow:focus {
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.35), 0 0 16px rgba(37, 99, 235, 0.12);
+  border-color: #2563eb !important;
+  outline: none;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Pending Triage badge
+───────────────────────────────────────────────────────────── */
+.badge-pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #fbbf24;
+}
+
+.badge-pending::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f59e0b;
+  animation: pulse-amber 2s ease-in-out infinite;
+}
+
+@keyframes pulse-amber {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.5); }
+  50%       { opacity: 0.7; box-shadow: 0 0 0 4px rgba(245, 158, 11, 0); }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   File Support box – emerald
+───────────────────────────────────────────────────────────── */
+.file-support-box {
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid #059669;
+  border-radius: 10px;
+  padding: 12px 14px;
+  color: #a7f3d0;
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.file-support-box strong {
+  color: #34d399;
+  font-weight: 600;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Progress bar
+───────────────────────────────────────────────────────────── */
+.progress-track {
+  height: 4px;
+  width: 100%;
+  background: rgba(51, 65, 85, 0.6);
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, #2563eb, #3b82f6, #60a5fa);
+  transition: width 0.4s ease;
+}
+
+.progress-fill-animated {
+  animation: progress-shimmer 1.8s ease-in-out infinite;
+  background-size: 200% 100%;
+  background: linear-gradient(90deg, #1d4ed8 0%, #3b82f6 50%, #1d4ed8 100%);
+  background-size: 200% 100%;
+}
+
+@keyframes progress-shimmer {
+  0%   { background-position: 200% center; }
+  100% { background-position: -200% center; }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Drag & Drop zone
+───────────────────────────────────────────────────────────── */
+.drop-zone {
+  border: 2px dashed #334155;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.4);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.drop-zone:hover,
+.drop-zone.drag-over {
+  border-color: #2563eb;
+  background: rgba(37, 99, 235, 0.06);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.08);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Shimmer loading animation
+───────────────────────────────────────────────────────────── */
+@keyframes shimmer {
+  from { background-position: -200% 0; }
+  to   { background-position:  200% 0; }
+}
+
+.shimmer {
+  background: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s infinite;
+  border-radius: 8px;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   AI typing cursor blink
+───────────────────────────────────────────────────────────── */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+.cursor-blink::after {
+  content: "▋";
+  animation: blink 1s step-end infinite;
+  color: #3b82f6;
+  margin-left: 1px;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Responsive tweaks
+───────────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  table { font-size: 0.75rem; }
+}
