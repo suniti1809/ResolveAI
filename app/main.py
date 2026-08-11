@@ -49,6 +49,7 @@ async def lifespan(app: FastAPI):
 # ──────────────────────────────────────────────
 
 app = FastAPI(
+    
     title="ResolveAI Customer Complaint Management System",
     version="1.0.0",
     description=(
@@ -60,7 +61,10 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],          # tighten in production
+    allow_origins=["https://resolve-ih4iosijb-meon.vercel.app",
+                   "https://resolveai-ccms.vercel.app",
+                    "http://localhost:5173,
+  ],          # tighten in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
