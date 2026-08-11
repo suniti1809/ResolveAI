@@ -57,21 +57,17 @@ app = FastAPI(
     ),
     lifespan=lifespan,
 )
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-
-app = FastAPI()
 
 origins = [
     "https://resolve-ih4iosijb-meon.vercel.app",
-    "https://resolveai-ccms.vercel.app,  
-    "http://localhost:3000", # For local frontend dev
-    "http://localhost:5173", # Vite local dev
+    "https://resolveai-ccms.vercel.app", # Fixed unclosed quote here
+    "http://localhost:3000",             # For local frontend dev
+    "http://localhost:5173",             # Vite local dev
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins, # Or ["*"] during debugging
+    allow_origins=origins,              # Or ["*"] during debugging
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
