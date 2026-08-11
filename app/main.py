@@ -80,9 +80,9 @@ def read_root():
 # Health
 # ──────────────────────────────────────────────
 
-@app.get("/health", tags=["Health"])
+@app.api_route("/healthz", methods=["GET", "HEAD"])
 async def health_check():
-    return {"status": "ok", "service": "ResolveAI", "version": "1.0.0"}
+    return {"status": "ok"}
 
 
 # ══════════════════════════════════════════════
