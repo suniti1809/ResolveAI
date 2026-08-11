@@ -29,7 +29,7 @@ from app.utils import logger, naive_sentiment
 load_dotenv()
 
 _GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-_MODEL        = "llama-3.3-70b-versatile"
+_MODEL        = "llama-3.1-8b-instant"
 
 
 # ──────────────────────────────────────────────
