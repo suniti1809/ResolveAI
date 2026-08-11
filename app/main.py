@@ -71,18 +71,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/")
-def read_root():
-    return {"status": "active", "message": "ResolveAI Backend is up and running!"}
 
 
 # ──────────────────────────────────────────────
-# Health
+# Health & Root Endpoints
 # ──────────────────────────────────────────────
-
 @app.api_route("/", methods=["GET", "HEAD"])
 async def root():
-    return {"message": "ResolveAI is running"}
+    return {"status": "active", "message": "ResolveAI Backend is up and running!"}
 
 @app.api_route("/healthz", methods=["GET", "HEAD"])
 async def health_check():
