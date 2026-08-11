@@ -80,6 +80,10 @@ def read_root():
 # Health
 # ──────────────────────────────────────────────
 
+@app.api_route("/", methods=["GET", "HEAD"])
+async def root():
+    return {"message": "ResolveAI is running"}
+
 @app.api_route("/healthz", methods=["GET", "HEAD"])
 async def health_check():
     return {"status": "ok"}
