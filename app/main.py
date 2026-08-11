@@ -61,8 +61,6 @@ app = FastAPI(
 origins = [
     "https://resolve-ih4iosijb-meon.vercel.app",
     "https://resolveai-ccms.vercel.app", # Fixed unclosed quote here
-    "http://localhost:3000",             # For local frontend dev
-    "http://localhost:5173",             # Vite local dev
 ]
 
 app.add_middleware(
