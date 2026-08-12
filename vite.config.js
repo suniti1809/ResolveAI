@@ -9,7 +9,7 @@ export default defineConfig({
     proxy: {
       // Proxy /api calls to the FastAPI backend during development
       "/api": {
-        target: "http://localhost:8000",
+        target: "https://resolveai-xnzt.onrender.com/",
         changeOrigin: true,
       },
     },
