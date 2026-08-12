@@ -1,300 +1,826 @@
-"""
-AIVOA CCMS – graph.py
-LangGraph-powered AI pipeline for complaint analysis and assistant chat.
-
-Pipeline nodes (StateGraph – linear chain):
-  1. classify   – Determine category, priority, root cause, confidence
-  2. sentiment  – Sentiment label + urgency score 1-10
-  3. summary    – 2-3 sentence executive summary
-  4. action     – Numbered list of recommended resolution steps
-
-The chat_with_assistant function supports multi-turn conversation.
-"""
 from __future__ import annotations
 
 import asyncio
 import json
 import os
-from typing import Optional
+from typing import Any, TypedDict
 
 from dotenv import load_dotenv
-from groq import Groq
+
+from langchain_core.messages import (
+    AIMessage,
+    HumanMessage,
+    SystemMessage,
+)
+
 from langchain_groq import ChatGroq
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from langgraph.graph import END, START, StateGraph
-from typing_extensions import TypedDict
+
+from langgraph.graph import (
+    END,
+    START,
+    StateGraph,
+)
 
 from app.utils import logger, naive_sentiment
 
+
 load_dotenv()
 
-_GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-_MODEL        = "llama-3.1-8b-instant"
+
+# ============================================================
+# ENVIRONMENT
+# ============================================================
+
+GROQ_API_KEY = os.getenv(
+    "GROQ_API_KEY",
+    ""
+).strip()
+
+GROQ_MODEL = os.getenv(
+    "GROQ_MODEL",
+    "gemma2-9b-it"
+).strip()
 
 
-# ──────────────────────────────────────────────
-# Groq / LangChain client helpers
-# ──────────────────────────────────────────────
+# ============================================================
+# CONFIG CHECK
+# ============================================================
 
-def _get_raw_client() -> Groq:
-    """Raw Groq SDK client (used for multi-turn assistant chat)."""
-    if not _GROQ_API_KEY or _GROQ_API_KEY == "your_groq_api_key_here":
+def check_groq_config():
+
+    if not GROQ_API_KEY:
+
         raise RuntimeError(
-            "GROQ_API_KEY is not set. Please update backend/.env before using AI features."
+            "GROQ_API_KEY is missing. "
+            "Add it to Render Environment Variables."
         )
-    return Groq(api_key=_GROQ_API_KEY)
 
 
-def _get_lc_llm() -> ChatGroq:
-    """LangChain-compatible ChatGroq wrapper (used inside LangGraph nodes)."""
-    if not _GROQ_API_KEY or _GROQ_API_KEY == "your_groq_api_key_here":
-        raise RuntimeError(
-            "GROQ_API_KEY is not set. Please update backend/.env before using AI features."
-        )
+# ============================================================
+# LLM
+# ============================================================
+
+def get_llm(
+    temperature: float = 0.2,
+    max_tokens: int = 1500,
+):
+
+    check_groq_config()
+
     return ChatGroq(
-        api_key=_GROQ_API_KEY,
-        model_name=_MODEL,
-        temperature=0.3,
+        api_key=GROQ_API_KEY,
+        model=GROQ_MODEL,
+        temperature=temperature,
+        max_tokens=max_tokens,
     )
 
 
-def _lc_chat(system: str, user: str, temperature: float = 0.3) -> str:
-    """
-    Synchronous single-shot LangChain chat via ChatGroq.
-    Called from inside LangGraph nodes (which are sync).
-    """
-    llm  = ChatGroq(api_key=_GROQ_API_KEY, model_name=_MODEL, temperature=temperature)
-    msgs = [SystemMessage(content=system), HumanMessage(content=user)]
-    resp = llm.invoke(msgs)
-    return resp.content.strip()
+# ============================================================
+# JSON PARSER
+# ============================================================
+
+def parse_json(text: str) -> dict[str, Any]:
+
+    if not text:
+
+        raise ValueError(
+            "AI returned an empty response."
+        )
+
+    text = text.strip()
+
+    # Remove markdown fences
+    if text.startswith("```"):
+
+        lines = text.splitlines()
+
+        if lines:
+            lines = lines[1:]
+
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+
+        text = "\n".join(lines).strip()
+
+    # Direct JSON
+    try:
+
+        return json.loads(text)
+
+    except json.JSONDecodeError:
+
+        pass
+
+    # Search JSON object
+    start = text.find("{")
+    end = text.rfind("}")
+
+    if start != -1 and end != -1:
+
+        json_text = text[
+            start:end + 1
+        ]
+
+        try:
+
+            return json.loads(
+                json_text
+            )
+
+        except json.JSONDecodeError:
+
+            pass
+
+    raise ValueError(
+        "AI did not return valid JSON."
+    )
 
 
-# ──────────────────────────────────────────────
-# LangGraph State Schema (TypedDict)
-# ──────────────────────────────────────────────
+# ============================================================
+# STATE
+# ============================================================
 
-class AnalysisState(TypedDict, total=False):
-    description:      str
-    category:         str
-    priority:         str
-    sentiment:        str
-    urgency_score:    int
-    summary:          str
-    root_cause:       str
+class ComplaintState(TypedDict, total=False):
+
+    description: str
+
+    category: str
+
+    priority: str
+
+    sentiment: str
+
+    urgency_score: int
+
+    summary: str
+
+    root_cause: str
+
     suggested_action: str
-    confidence:       str
-    error:            Optional[str]
+
+    confidence: str
+
+    error: str
 
 
-# ──────────────────────────────────────────────
-# LangGraph Nodes
-# Each node receives the FULL state dict and returns
-# a PARTIAL dict of keys to update (LangGraph merges them).
-# ──────────────────────────────────────────────
+# ============================================================
+# CLASSIFICATION
+# ============================================================
 
-def _node_classify(state: AnalysisState) -> dict:
-    """Node 1: Classify category, priority, root cause, confidence."""
-    system = (
-        "You are a QMS (Quality Management System) specialist. "
-        "Given a customer complaint, return ONLY a valid JSON object with these exact keys:\n"
-        '  "category": one of [product_quality, delivery, customer_service, billing, technical, other]\n'
-        '  "priority": one of [low, medium, high, critical]\n'
-        '  "root_cause": a concise root-cause statement (max 120 chars)\n'
-        '  "confidence": a float between 0 and 1\n'
-        "Return nothing else — no markdown fences, no explanation."
+def classify_node(
+    state: ComplaintState
+):
+
+    description = state.get(
+        "description",
+        ""
     )
-    text = state.get("description", "")
+
+    system_prompt = """
+You are ResolveAI, a pharmaceutical
+Quality Management System AI.
+
+Analyze the customer complaint.
+
+Return ONLY valid JSON:
+
+{
+  "category": "product_quality|delivery|customer_service|billing|technical|other",
+  "priority": "low|medium|high|critical",
+  "root_cause": "possible root cause",
+  "confidence": "0.0"
+}
+
+Rules:
+
+- Never invent facts.
+- If the cause is unknown, say investigation is required.
+- High/critical priority should be considered for
+  patient safety, contamination, wrong product,
+  wrong strength, sterility, serious harm,
+  or significant regulatory risk.
+- This is decision support.
+- Final QA decisions require human review.
+"""
+
     try:
-        raw  = _lc_chat(system, text, temperature=0.2)
-        # Strip accidental markdown fences from LLM output
-        raw  = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
-        data = json.loads(raw)
-        return {
-            "category":   data.get("category",   "other"),
-            "priority":   data.get("priority",   "medium"),
-            "root_cause": data.get("root_cause",  ""),
-            "confidence": str(data.get("confidence", "0.8")),
+
+        llm = get_llm(
+            temperature=0.1,
+            max_tokens=800,
+        )
+
+        response = llm.invoke([
+            SystemMessage(
+                content=system_prompt
+            ),
+            HumanMessage(
+                content=description
+            ),
+        ])
+
+        data = parse_json(
+            str(response.content)
+        )
+
+        category = str(
+            data.get(
+                "category",
+                "other"
+            )
+        ).lower().strip()
+
+        priority = str(
+            data.get(
+                "priority",
+                "medium"
+            )
+        ).lower().strip()
+
+        categories = {
+            "product_quality",
+            "delivery",
+            "customer_service",
+            "billing",
+            "technical",
+            "other",
         }
+
+        priorities = {
+            "low",
+            "medium",
+            "high",
+            "critical",
+        }
+
+        if category not in categories:
+
+            category = "other"
+
+        if priority not in priorities:
+
+            priority = "medium"
+
+        return {
+
+            "category": category,
+
+            "priority": priority,
+
+            "root_cause": str(
+                data.get(
+                    "root_cause",
+                    "Investigation required."
+                )
+            ),
+
+            "confidence": str(
+                data.get(
+                    "confidence",
+                    "0.5"
+                )
+            ),
+        }
+
     except Exception as exc:
-        logger.warning("classify node failed: %s", exc)
+
+        logger.exception(
+            "Classification failed"
+        )
+
         return {
-            "category":   "other",
-            "priority":   "medium",
-            "root_cause": "",
-            "confidence": "0.5",
-            "error":      str(exc),
+
+            "category": "other",
+
+            "priority": "medium",
+
+            "root_cause": (
+                "AI analysis unavailable. "
+                "Manual investigation required."
+            ),
+
+            "confidence": "0",
+
+            "error": str(exc),
         }
 
 
-def _node_sentiment(state: AnalysisState) -> dict:
-    """Node 2: Sentiment analysis + urgency score."""
-    system = (
-        "You are a sentiment analysis expert. "
-        "Given a customer complaint, return ONLY a valid JSON object with:\n"
-        '  "sentiment": one of [positive, neutral, negative]\n'
-        '  "urgency_score": integer 1-10 (10 = most urgent)\n'
-        "Return nothing else — no markdown fences, no explanation."
+# ============================================================
+# SENTIMENT
+# ============================================================
+
+def sentiment_node(
+    state: ComplaintState
+):
+
+    description = state.get(
+        "description",
+        ""
     )
-    text = state.get("description", "")
+
+    system_prompt = """
+Analyze the complaint sentiment and urgency.
+
+Return ONLY JSON:
+
+{
+  "sentiment": "positive|neutral|negative",
+  "urgency_score": 1
+}
+
+urgency_score must be 1 to 10.
+
+Consider:
+
+- patient safety
+- product quality
+- contamination
+- serious harm
+- regulatory impact
+- customer impact
+"""
+
     try:
-        raw  = _lc_chat(system, text, temperature=0.2)
-        raw  = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
-        data = json.loads(raw)
+
+        llm = get_llm(
+            temperature=0.1,
+            max_tokens=400,
+        )
+
+        response = llm.invoke([
+            SystemMessage(
+                content=system_prompt
+            ),
+            HumanMessage(
+                content=description
+            ),
+        ])
+
+        data = parse_json(
+            str(response.content)
+        )
+
+        sentiment = str(
+            data.get(
+                "sentiment",
+                "neutral"
+            )
+        ).lower()
+
+        if sentiment not in {
+            "positive",
+            "neutral",
+            "negative",
+        }:
+
+            sentiment = naive_sentiment(
+                description
+            )
+
+        try:
+
+            urgency = int(
+                data.get(
+                    "urgency_score",
+                    5
+                )
+            )
+
+        except Exception:
+
+            urgency = 5
+
+        urgency = max(
+            1,
+            min(10, urgency)
+        )
+
         return {
-            "sentiment":     data.get("sentiment",     naive_sentiment(text)),
-            "urgency_score": int(data.get("urgency_score", 5)),
+
+            "sentiment": sentiment,
+
+            "urgency_score": urgency,
         }
-    except Exception as exc:
-        logger.warning("sentiment node failed: %s", exc)
+
+    except Exception:
+
+        logger.exception(
+            "Sentiment analysis failed"
+        )
+
         return {
-            "sentiment":     naive_sentiment(text),
+
+            "sentiment": naive_sentiment(
+                description
+            ),
+
             "urgency_score": 5,
         }
 
 
-def _node_summary(state: AnalysisState) -> dict:
-    """Node 3: Executive summary."""
-    system = (
-        "You are a concise business analyst. "
-        "Summarise the following customer complaint in 2-3 sentences for a support manager. "
-        "Focus on impact, what went wrong, and urgency. Be factual and professional."
+# ============================================================
+# SUMMARY
+# ============================================================
+
+def summary_node(
+    state: ComplaintState
+):
+
+    description = state.get(
+        "description",
+        ""
     )
-    text = state.get("description", "")
+
+    system_prompt = """
+Create a professional pharmaceutical
+complaint summary.
+
+Requirements:
+
+- 2 to 3 sentences
+- factual
+- concise
+- do not invent information
+- mention product/problem and impact
+  when information is available
+
+Return plain text only.
+"""
+
     try:
-        summary = _lc_chat(system, text, temperature=0.4)
-        return {"summary": summary}
-    except Exception as exc:
-        logger.warning("summary node failed: %s", exc)
-        return {"summary": text[:200]}
+
+        llm = get_llm(
+            temperature=0.2,
+            max_tokens=500,
+        )
+
+        response = llm.invoke([
+            SystemMessage(
+                content=system_prompt
+            ),
+            HumanMessage(
+                content=description
+            ),
+        ])
+
+        return {
+
+            "summary": str(
+                response.content
+            ).strip()
+        }
+
+    except Exception:
+
+        logger.exception(
+            "Summary failed"
+        )
+
+        return {
+
+            "summary": description[:500]
+        }
 
 
-def _node_action(state: AnalysisState) -> dict:
-    """Node 4: Suggested resolution action."""
-    system = (
-        "You are a customer-experience resolution expert at ResolveAI. "
-        "Given the complaint context below, provide a numbered list of 3-5 concrete action steps "
-        "that the support team should take to resolve the issue. Be specific and actionable."
-    )
-    context = (
-        f"Category: {state.get('category', '')}\n"
-        f"Priority: {state.get('priority', '')}\n"
-        f"Root Cause: {state.get('root_cause', '')}\n"
-        f"Complaint: {state.get('description', '')}"
-    )
+# ============================================================
+# ROOT CAUSE + CAPA
+# ============================================================
+
+def action_node(
+    state: ComplaintState
+):
+
+    context = f"""
+Complaint:
+
+{state.get("description", "")}
+
+Category:
+
+{state.get("category", "")}
+
+Priority:
+
+{state.get("priority", "")}
+
+Possible root cause:
+
+{state.get("root_cause", "")}
+"""
+
+    system_prompt = """
+You are a pharmaceutical Quality Assurance specialist.
+
+Recommend investigation and CAPA actions.
+
+Return ONLY valid JSON:
+
+{
+  "root_cause": "possible root cause",
+  "suggested_action": "1. action\\n2. action\\n3. action",
+  "confidence": "0.0"
+}
+
+Provide 3 to 5 practical actions.
+
+Consider:
+
+1. Immediate containment
+2. Batch investigation
+3. Evidence/document review
+4. Root cause investigation
+5. Corrective action
+6. Preventive action
+7. Customer communication
+8. QA escalation
+
+Never invent facts.
+
+Do not say that recall or regulatory reporting
+is automatically required.
+
+Final decision requires human QA review.
+"""
+
     try:
-        action = _lc_chat(system, context, temperature=0.5)
-        return {"suggested_action": action}
-    except Exception as exc:
-        logger.warning("action node failed: %s", exc)
-        return {"suggested_action": "Please review the complaint and follow standard escalation protocol."}
+
+        llm = get_llm(
+            temperature=0.2,
+            max_tokens=1000,
+        )
+
+        response = llm.invoke([
+            SystemMessage(
+                content=system_prompt
+            ),
+            HumanMessage(
+                content=context
+            ),
+        ])
+
+        data = parse_json(
+            str(response.content)
+        )
+
+        return {
+
+            "root_cause": str(
+                data.get(
+                    "root_cause",
+                    state.get(
+                        "root_cause",
+                        ""
+                    )
+                )
+            ),
+
+            "suggested_action": str(
+                data.get(
+                    "suggested_action",
+                    ""
+                )
+            ),
+
+            "confidence": str(
+                data.get(
+                    "confidence",
+                    state.get(
+                        "confidence",
+                        "0.5"
+                    )
+                )
+            ),
+        }
+
+    except Exception:
+
+        logger.exception(
+            "CAPA generation failed"
+        )
+
+        return {
+
+            "suggested_action": (
+                "1. Review complaint details and evidence.\n"
+                "2. Assess product and patient/customer risk.\n"
+                "3. Investigate the suspected root cause.\n"
+                "4. Determine corrective and preventive actions.\n"
+                "5. Obtain QA approval before final disposition."
+            )
+        }
 
 
-# ──────────────────────────────────────────────
-# Build & compile the LangGraph StateGraph
-# ──────────────────────────────────────────────
+# ============================================================
+# LANGGRAPH
+# ============================================================
 
-def _build_pipeline():
-    """
-    Constructs the LangGraph pipeline:
-        classify_node → sentiment_node → summary_node → action_node → END
-    """
-    builder = StateGraph(AnalysisState)
+def build_pipeline():
 
-    # Register nodes
-    builder.add_node("classify_node",  _node_classify)
-    builder.add_node("sentiment_node", _node_sentiment)
-    builder.add_node("summary_node",   _node_summary)
-    builder.add_node("action_node",    _node_action)
-
-    # Linear edges
-    builder.add_edge(START, "classify_node")
-    builder.add_edge("classify_node",  "sentiment_node")
-    builder.add_edge("sentiment_node", "summary_node")
-    builder.add_edge("summary_node",   "action_node")
-    builder.add_edge("action_node",    END)
-
-    return builder.compile()
-
-
-
-# Compile once at module load (fast — no LLM calls here)
-_pipeline = _build_pipeline()
-
-
-# ──────────────────────────────────────────────
-# Public API
-# ──────────────────────────────────────────────
-
-async def analyse_complaint(description: str) -> AnalysisState:
-    """
-    Run the full LangGraph analysis pipeline on a complaint description.
-
-    Runs synchronous LangGraph pipeline in a thread-pool executor so it
-    doesn't block FastAPI's async event loop.
-
-    Returns a dict with:
-        category, priority, sentiment, urgency_score,
-        summary, root_cause, suggested_action, confidence
-    """
-    initial_state: AnalysisState = {"description": description}
-
-    loop   = asyncio.get_running_loop()
-    result = await loop.run_in_executor(None, _pipeline.invoke, initial_state)
-
-    logger.info(
-        "Analysis complete: sentiment=%s urgency=%s category=%s",
-        result.get("sentiment"),
-        result.get("urgency_score"),
-        result.get("category"),
+    workflow = StateGraph(
+        ComplaintState
     )
+
+    workflow.add_node(
+        "classify",
+        classify_node
+    )
+
+    workflow.add_node(
+        "sentiment",
+        sentiment_node
+    )
+
+    workflow.add_node(
+        "summary",
+        summary_node
+    )
+
+    workflow.add_node(
+        "action",
+        action_node
+    )
+
+    workflow.add_edge(
+        START,
+        "classify"
+    )
+
+    workflow.add_edge(
+        "classify",
+        "sentiment"
+    )
+
+    workflow.add_edge(
+        "sentiment",
+        "summary"
+    )
+
+    workflow.add_edge(
+        "summary",
+        "action"
+    )
+
+    workflow.add_edge(
+        "action",
+        END
+    )
+
+    return workflow.compile()
+
+
+pipeline = build_pipeline()
+
+
+# ============================================================
+# COMPLAINT ANALYSIS
+# ============================================================
+
+async def analyse_complaint(
+    description: str
+):
+
+    if not description.strip():
+
+        raise ValueError(
+            "Complaint description cannot be empty."
+        )
+
+    loop = asyncio.get_running_loop()
+
+    result = await loop.run_in_executor(
+        None,
+        pipeline.invoke,
+        {
+            "description": description.strip()
+        }
+    )
+
     return result
 
+
+# ============================================================
+# AI CHAT
+# ============================================================
 
 async def chat_with_assistant(
     messages: list[dict],
     complaint_context: str | None = None,
-) -> str:
-    """
-    Multi-turn conversational AI using LangChain's ChatGroq.
+):
 
-    Args:
-        messages: list of {role, content} dicts (user + assistant turns)
-        complaint_context: optional complaint text injected as system context
-    """
-    system_content = (
-        "You are ResolveAI Assistant — an intelligent customer support specialist "
-        "at ResolveAI's Quality Management System. You help support agents:\n"
-        "  • Understand the root cause of complaints\n"
-        "  • Draft professional responses to customers\n"
-        "  • Suggest resolution steps and escalation paths\n"
-        "  • Provide insights on quality trends\n"
-        "Always be professional, empathetic, and concise. "
-        "If a complaint context is provided, use it to give specific advice."
-    )
+    if not messages:
+
+        return (
+            "Please enter a message."
+        )
+
+    system_prompt = """
+You are ResolveAI AI Copilot.
+
+You assist pharmaceutical
+customer complaint and QA teams.
+
+You can help with:
+
+- complaint analysis
+- risk assessment
+- investigation
+- possible root causes
+- CAPA suggestions
+- complaint documentation
+- professional response drafting
+
+Rules:
+
+1. Never invent facts.
+2. Never make the final QA decision.
+3. Never claim a recall is mandatory.
+4. Never claim regulatory reporting is mandatory.
+5. Recommend human QA review for important decisions.
+6. Be concise and professional.
+"""
+
     if complaint_context:
-        system_content += f"\n\n--- Current Complaint ---\n{complaint_context}"
 
-    # Build LangChain message list
-    lc_messages = [SystemMessage(content=system_content)]
-    for m in messages:
-        role    = m.get("role", "user")
-        content = m.get("content", "")
+        system_prompt += f"""
+
+CURRENT COMPLAINT:
+
+--------------------------------
+
+{complaint_context}
+
+--------------------------------
+"""
+
+    chat_messages = [
+        SystemMessage(
+            content=system_prompt
+        )
+    ]
+
+    for message in messages:
+
+        role = message.get(
+            "role",
+            "user"
+        )
+
+        content = str(
+            message.get(
+                "content",
+                ""
+            )
+        ).strip()
+
+        if not content:
+            continue
+
         if role == "user":
-            lc_messages.append(HumanMessage(content=content))
-        elif role == "assistant":
-            lc_messages.append(AIMessage(content=content))
 
-    def _call() -> str:
-        llm  = ChatGroq(api_key=_GROQ_API_KEY, model_name=_MODEL, temperature=0.6, max_tokens=1024)
-        resp = llm.invoke(lc_messages)
-        return resp.content.strip()
+            chat_messages.append(
+                HumanMessage(
+                    content=content
+                )
+            )
+
+        elif role == "assistant":
+
+            chat_messages.append(
+                AIMessage(
+                    content=content
+                )
+            )
+
+    def call_llm():
+
+        llm = get_llm(
+            temperature=0.3,
+            max_tokens=1200,
+        )
+
+        response = llm.invoke(
+            chat_messages
+        )
+
+        return str(
+            response.content
+        ).strip()
 
     try:
+
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, _call)
+
+        return await loop.run_in_executor(
+            None,
+            call_llm
+        )
+
     except Exception as exc:
-        logger.error("chat_with_assistant failed: %s", exc)
-        return (
-            "I'm currently unable to reach the AI service. "
-            "Please verify your GROQ_API_KEY in backend/.env and try again."
+
+        logger.exception(
+            "AI assistant failed"
+        )
+
+        raise RuntimeError(
+            f"AI service failed: {str(exc)}"
         )
